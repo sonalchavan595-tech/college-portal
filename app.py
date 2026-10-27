@@ -1,363 +1,107 @@
 
-import streamlit as st
-import sqlite3
-import pandas as pd
+import streamlit as st, sqlite3, pandas as pd
 from io import BytesIO
 from reportlab.pdfgen import canvas
 
-st.set_page_config(
-    page_title="College Management Portal",
-    page_icon="🎓",
-    layout="wide"
-)
-
-# Professional Blue Theme
+st.set_page_config(page_title="College Portal",page_icon="🎓",layout="wide")
 st.markdown("""
 <style>
-.stApp {
-    background: linear-gradient(135deg, #eaf2ff, #ffffff);
-}
-[data-testid="stSidebar"] {
-    background-color: #16345c;
-}
-[data-testid="stSidebar"] * {
-    color: white;
-}
-h1, h2, h3 {
-    color: #16345c;
-}
-.stButton > button {
-    background-color: #1e40af;
-    color: white;
-    border-radius: 8px;
-    border: none;
-}
-.stButton > button:hover {
-    background-color: #16345c;
-    color: white;
-}
-</style>
-""", unsafe_allow_html=True)
+.stApp{background:#F4F7FB;color:#12305A}
+h1,h2,h3,p,label,[data-testid="stWidgetLabel"] p{color:#12305A!important}
+[data-testid="stSidebar"]{background:#12305A}
+[data-testid="stSidebar"] *{color:white!important}
+[data-testid="stTextInput"] input{background:white!important;color:#12305A!important}
+.stButton button,.stFormSubmitButton button{background:#1D4ED8!important;color:white!important}
+[data-testid="stMetric"]{background:white;padding:10px;border-radius:10px}
+@media(max-width:768px){.block-container{padding:.7rem!important}h1{font-size:1.6rem!important}}
+</style>""",unsafe_allow_html=True)
 
-# Database connection
-db = sqlite3.connect("students.db", check_same_thread=False)
-
-db.execute("""
-CREATE TABLE IF NOT EXISTS students (
-    name TEXT,
-    roll TEXT UNIQUE,
-    course TEXT
-)
-""")
-db.execute("""
-CREATE TABLE IF NOT EXISTS marks (
-    roll TEXT,
-    subject TEXT,
-    marks REAL
-)
-""")
-db.execute("""
-CREATE TABLE IF NOT EXISTS attendance (
-    roll TEXT,
-    day TEXT,
-    status TEXT
-)
+db=sqlite3.connect("students.db",check_same_thread=False)
+db.executescript("""
+CREATE TABLE IF NOT EXISTS students(name TEXT,roll TEXT UNIQUE,course TEXT);
+CREATE TABLE IF NOT EXISTS attendance(roll TEXT,day TEXT,status TEXT);
+CREATE TABLE IF NOT EXISTS marks(roll TEXT,subject TEXT,marks REAL);
 """)
 db.commit()
+st.title("🎓 College Portal")
 
-st.title("🎓 College Management Portal")
-st.caption("Student Records | Attendance | Marks | Reports")
-
-# Login
-if "login" not in st.session_state:
-    st.session_state.login = False
-
-if not st.session_state.login:
-    st.subheader("Admin Login")
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-
-    if st.button("Login"):
-        if username == "admin" and password == "admin123":
-            st.session_state.login = True
-            st.rerun()
-        else:
-            st.error("Incorrect username or password.")
+if "logged_in" not in st.session_state: st.session_state.logged_in=False
+if not st.session_state.logged_in:
+    with st.form("login"):
+        u=st.text_input("Username"); p=st.text_input("Password",type="password")
+        ok=st.form_submit_button("Login")
+    if ok:
+        if (u,p)==("admin","admin123"):
+            st.session_state.logged_in=True; st.rerun()
+        else: st.error("Wrong login")
     st.stop()
 
-# Navigation
-page = st.sidebar.radio(
-    "Navigation",
-    ["Home", "Students", "Attendance", "Marks", "PDF Report"]
-)
-
+page=st.sidebar.radio("Menu",["Home","Students","Attendance","Marks","PDF Report"])
 if st.sidebar.button("Logout"):
-    st.session_state.login = False
-    st.rerun()
+    st.session_state.logged_in=False; st.rerun()
 
-# Read student records
-try:
-    students = db.execute(
-        "SELECT name, roll, course FROM students"
-    ).fetchall()
-except sqlite3.OperationalError as e:
-    st.error("Database columns need checking: " + str(e))
-    st.stop()
+try: students=db.execute("SELECT name,roll,course FROM students").fetchall()
+except sqlite3.Error as e: st.error(str(e)); st.stop()
 
-# Dashboard
-if page == "Home":
-    st.header("📊 Dashboard")
+courses=["BCA","BBA","BSc","BCom","BA","BTech","MCA"]
 
-    attendance_count = db.execute(
-        "SELECT COUNT(*) FROM attendance"
-    ).fetchone()[0]
-    marks_count = db.execute(
-        "SELECT COUNT(*) FROM marks"
-    ).fetchone()[0]
+if page=="Home":
+    a,b,c=st.columns(3)
+    a.metric("Students",len(students))
+    b.metric("Attendance",db.execute("SELECT COUNT(*) FROM attendance").fetchone()[0])
+    c.metric("Marks",db.execute("SELECT COUNT(*) FROM marks").fetchone()[0])
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total Students", len(students))
-    col2.metric("Attendance Records", attendance_count)
-    col3.metric("Marks Records", marks_count)
+elif page=="Students":
+    act=st.selectbox("Action",["View","Add","Edit","Delete"])
+    if act=="Add":
+        with st.form("add"):
+            n=st.text_input("Name"); r=st.text_input("Roll")
+            co=st.selectbox("Course",courses); ok=st.form_submit_button("Add")
+        if ok:
+            try:
+                db.execute("INSERT INTO students(name,roll,course) VALUES(?,?,?)",(n.strip(),r.strip(),co))
+                db.commit(); st.success("Added!"); st.rerun()
+            except sqlite3.Error as e: st.error(str(e))
+    elif act in ["Edit","Delete"] and students:
+        s=st.selectbox("Student",students,format_func=lambda x:f"{x[0]} - {x[1]}")
+        if act=="Edit":
+            n=st.text_input("Name",s[0]); co=st.selectbox("Course",courses,index=courses.index(s[2]) if s[2] in courses else 0)
+            if st.button("Update"):
+                db.execute("UPDATE students SET name=?,course=? WHERE roll=?",(n,co,s[1]))
+                db.commit(); st.rerun()
+        elif st.button("Delete"):
+            db.execute("DELETE FROM students WHERE roll=?",(s[1],)); db.commit(); st.rerun()
+    st.dataframe(pd.read_sql_query("SELECT * FROM students",db),use_container_width=True)
 
-    st.success("Welcome to your College Portal!")
-
-# Student Management
-elif page == "Students":
-    st.header("👨‍🎓 Student Management")
-
-    action = st.radio(
-        "Select Action",
-        ["Add", "Edit", "Delete"],
-        horizontal=True
-    )
-
-    if action == "Add":
-        with st.form("add_student"):
-            name = st.text_input("Student Name")
-            roll = st.text_input("Roll Number")
-            course = st.selectbox(
-                "Course",
-                ["BCA", "BBA", "BSc", "BCom", "BA", "BTech", "MCA"]
-            )
-            submitted = st.form_submit_button("Add Student")
-
-        if submitted:
-            if name.strip() and roll.strip():
-                try:
-                    db.execute(
-                        "INSERT INTO students (name, roll, course) VALUES (?, ?, ?)",
-                        (name.strip(), roll.strip(), course)
-                    )
-                    db.commit()
-                    st.success("Student added successfully!")
-                    st.rerun()
-                except sqlite3.IntegrityError:
-                    st.error("Roll number already exists.")
-                except sqlite3.OperationalError as e:
-                    st.error("Database column mismatch: " + str(e))
-            else:
-                st.warning("Enter name and roll number.")
-
-    elif action == "Edit":
-        if students:
-            student = st.selectbox(
-                "Select Student",
-                students,
-                format_func=lambda s: f"{s[0]} - {s[1]}"
-            )
-            new_name = st.text_input("Name", student[0])
-            new_course = st.text_input("Course", student[2] or "")
-
-            if st.button("Update Student"):
-                db.execute(
-                    "UPDATE students SET name=?, course=? WHERE roll=?",
-                    (new_name.strip(), new_course.strip(), student[1])
-                )
-                db.commit()
-                st.success("Student updated!")
-                st.rerun()
-        else:
-            st.info("No students available.")
-
-    elif action == "Delete":
-        if students:
-            student = st.selectbox(
-                "Select Student to Delete",
-                students,
-                format_func=lambda s: f"{s[0]} - {s[1]}"
-            )
-            if st.button("Delete Student"):
-                db.execute(
-                    "DELETE FROM students WHERE roll=?",
-                    (student[1],)
-                )
-                db.commit()
-                st.success("Student deleted.")
-                st.rerun()
-        else:
-            st.info("No students available.")
-
-    st.subheader("Student List")
-    st.dataframe(
-        pd.DataFrame(students, columns=["Name", "Roll", "Course"]),
-        use_container_width=True
-    )
-
-# Attendance
-elif page == "Attendance":
-    st.header("📅 Attendance Management")
-
-    if students:
-        student = st.selectbox(
-            "Select Student",
-            students,
-            format_func=lambda s: f"{s[0]} - {s[1]}"
-        )
-        day = st.date_input("Date")
-        status = st.selectbox("Status", ["Present", "Absent"])
-
-        if st.button("Save Attendance"):
-            db.execute(
-                "DELETE FROM attendance WHERE roll=? AND day=?",
-                (student[1], str(day))
-            )
-            db.execute(
-                "INSERT INTO attendance (roll, day, status) VALUES (?, ?, ?)",
-                (student[1], str(day), status)
-            )
-            db.commit()
-            st.success("Attendance saved!")
-            st.rerun()
-
-        records = db.execute(
-            "SELECT day, status FROM attendance WHERE roll=? ORDER BY day DESC",
-            (student[1],)
-        ).fetchall()
-
-        st.dataframe(
-            pd.DataFrame(records, columns=["Date", "Status"]),
-            use_container_width=True
-        )
-
-        if records:
-            percentage = (
-                sum(row[1] == "Present" for row in records)
-                / len(records) * 100
-            )
-            st.metric("Attendance Percentage", f"{percentage:.1f}%")
+elif page in ["Attendance","Marks","PDF Report"]:
+    if not students: st.info("Pehle student add karo.")
     else:
-        st.info("Add a student first.")
-
-# Marks
-elif page == "Marks":
-    st.header("📝 Marks Management")
-
-    if students:
-        student = st.selectbox(
-            "Select Student",
-            students,
-            format_func=lambda s: f"{s[0]} - {s[1]}"
-        )
-        subject = st.text_input("Subject")
-        mark = st.number_input(
-            "Marks out of 100",
-            min_value=0.0,
-            max_value=100.0,
-            step=1.0
-        )
-
-        if st.button("Save Marks"):
-            if subject.strip():
-                db.execute(
-                    "DELETE FROM marks WHERE roll=? AND subject=?",
-                    (student[1], subject.strip())
-                )
-                db.execute(
-                    "INSERT INTO marks (roll, subject, marks) VALUES (?, ?, ?)",
-                    (student[1], subject.strip(), mark)
-                )
-                db.commit()
-                st.success("Marks saved!")
-                st.rerun()
-            else:
-                st.warning("Enter a subject name.")
-
-        records = db.execute(
-            "SELECT subject, marks FROM marks WHERE roll=?",
-            (student[1],)
-        ).fetchall()
-
-        st.dataframe(
-            pd.DataFrame(records, columns=["Subject", "Marks"]),
-            use_container_width=True
-        )
-
-        if records:
-            average = sum(row[1] for row in records) / len(records)
-            grade = (
-                "A" if average >= 80
-                else "B" if average >= 60
-                else "C" if average >= 40
-                else "Needs Improvement"
-            )
-
-            col1, col2 = st.columns(2)
-            col1.metric("Average Percentage", f"{average:.1f}%")
-            col2.metric("Grade", grade)
-    else:
-        st.info("Add a student first.")
-
-# PDF Report
-elif page == "PDF Report":
-    st.header("📄 Student PDF Report")
-
-    if students:
-        student = st.selectbox(
-            "Select Student",
-            students,
-            format_func=lambda s: f"{s[0]} - {s[1]}"
-        )
-
-        records = db.execute(
-            "SELECT subject, marks FROM marks WHERE roll=?",
-            (student[1],)
-        ).fetchall()
-
-        if st.button("Generate PDF"):
-            buffer = BytesIO()
-            pdf = canvas.Canvas(buffer)
-
-            pdf.setFont("Helvetica-Bold", 18)
-            pdf.drawString(50, 800, "COLLEGE MARKSHEET")
-            pdf.setFont("Helvetica", 12)
-            pdf.drawString(50, 765, f"Name: {student[0]}")
-            pdf.drawString(50, 745, f"Roll Number: {student[1]}")
-            pdf.drawString(50, 725, f"Course: {student[2]}")
-
-            y = 685
-            for subject_name, marks_value in records:
-                if y < 60:
-                    pdf.showPage()
-                    y = 800
-                pdf.drawString(
-                    50, y, f"{subject_name}: {marks_value}/100"
-                )
-                y -= 25
-
-            if records:
-                average = sum(row[1] for row in records) / len(records)
-                pdf.drawString(50, y - 15, f"Average: {average:.1f}%")
-
+        s=st.selectbox("Student",students,format_func=lambda x:f"{x[0]} - {x[1]}")
+        if page=="Attendance":
+            d=st.date_input("Date"); status=st.selectbox("Status",["Present","Absent"])
+            if st.button("Save Attendance"):
+                db.execute("DELETE FROM attendance WHERE roll=? AND day=?",(s[1],str(d)))
+                db.execute("INSERT INTO attendance VALUES(?,?,?)",(s[1],str(d),status))
+                db.commit(); st.success("Saved!")
+            rows=db.execute("SELECT day,status FROM attendance WHERE roll=?",(s[1],)).fetchall()
+            st.dataframe(pd.DataFrame(rows,columns=["Date","Status"]),use_container_width=True)
+            if rows: st.metric("Attendance %",f"{sum(x[1]=='Present' for x in rows)/len(rows)*100:.1f}%")
+        elif page=="Marks":
+            sub=st.text_input("Subject"); m=st.number_input("Marks",0,100)
+            if st.button("Save Marks") and sub.strip():
+                db.execute("DELETE FROM marks WHERE roll=? AND subject=?",(s[1],sub.strip()))
+                db.execute("INSERT INTO marks VALUES(?,?,?)",(s[1],sub.strip(),m))
+                db.commit(); st.success("Saved!")
+            rows=db.execute("SELECT subject,marks FROM marks WHERE roll=?",(s[1],)).fetchall()
+            st.dataframe(pd.DataFrame(rows,columns=["Subject","Marks"]),use_container_width=True)
+            if rows: st.metric("Average",f"{sum(x[1] for x in rows)/len(rows):.1f}%")
+        elif st.button("Generate PDF"):
+            b=BytesIO(); pdf=canvas.Canvas(b)
+            pdf.drawString(50,800,"COLLEGE REPORT")
+            pdf.drawString(50,770,f"{s[0]} | {s[1]} | {s[2]}")
+            for i,(sub,m) in enumerate(db.execute("SELECT subject,marks FROM marks WHERE roll=?",(s[1],)).fetchall()):
+                pdf.drawString(50,730-i*25,f"{sub}: {m}/100")
             pdf.save()
-
-            st.download_button(
-                "Download PDF",
-                data=buffer.getvalue(),
-                file_name="marksheet.pdf",
-                mime="application/pdf"
-            )
-    else:
-        st.info("Add a student first.")
+            st.download_button("Download PDF",b.getvalue(),"report.pdf","application/pdf")
 
 db.close()
