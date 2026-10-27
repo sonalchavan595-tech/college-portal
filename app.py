@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS attendance(roll TEXT,day TEXT,status TEXT);
 CREATE TABLE IF NOT EXISTS marks(roll TEXT,subject TEXT,marks REAL);
 """)
 db.commit()
-st.title("🎓 College Portal!")
+st.title("🎓 College Portal v2")
 
 if "logged_in" not in st.session_state: st.session_state.logged_in=False
 if not st.session_state.logged_in:
